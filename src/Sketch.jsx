@@ -5,6 +5,12 @@ import React, {
   forwardRef,
   useImperativeHandle,
 } from "react";
+
+function isRaspi() {
+  const ua = (navigator.userAgent || "").toLowerCase();
+  return ua.includes("raspi") || ua.includes("armv8") || ua.includes("aarch64");
+}
+
 import p5 from "p5";
 
 const K = {
@@ -678,6 +684,9 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
         cnv.elt.style.display = "block";
         p.noLoop();
         regenerate({ keepPalette: false }); // initial render (may randomize)
+
+        const pd = isRaspi() ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+        p.pixelDensity(pd);
       };
 
       // External (React) bridge
