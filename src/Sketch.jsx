@@ -1,3 +1,4 @@
+// src/Sketch.jsx
 import React, {
   useEffect,
   useRef,
@@ -19,7 +20,7 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
   const host = useRef(null);
   const instRef = useRef(null);
 
-  // keep latest callbacks without remounting p5
+  // Keep latest callbacks without remounting p5
   const onErrorRef = useRef(onError);
   const onPaletteChosenRef = useRef(onPaletteChosen);
   useEffect(() => {
@@ -49,7 +50,7 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
         lockPalette: false,
         lockedIndex: 0,
         randomizePalette: true,
-        // App may pin an actual palette for live updates
+        // When set (by App), stick to this exact palette during live updates
         forcePalette: null,
         fitToViewport: true,
         maxCanvasWidth: 1280,
@@ -70,6 +71,7 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
       const MAX_TRIES = 200;
       const rnd = (n) => (Math.random() * n) | 0;
 
+      // caches/guards
       let lastTargetW = 0;
       let lastTargetH = 0;
       let isRendering = false;
@@ -370,7 +372,7 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
         gx.noStroke();
         gx.background(0, 0);
         gx.fill(col);
-        const diam = 2 * CELL;
+        const diam = 2 * CELL; // center at opposite corner, matches export logic
         switch (corner) {
           case 0:
             gx.arc(0, 0, diam, diam, 0, p.HALF_PI, p.PIE);
@@ -423,34 +425,15 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
         const r = psh.r,
           c = psh.c,
           col = psh.col;
-
         if (psh.orientation === 0) {
-          // HORIZONTAL (left=(r,c), right=(r,c+1))
-          let leftCorner, rightCorner;
-          if (psh.facing === 0) {
-            // LEFT
-            leftCorner = 2; // BR
-            rightCorner = 0; // TL
-          } else {
-            // RIGHT
-            leftCorner = 1; // TR
-            rightCorner = 3; // BL
-          }
+          let leftCorner = psh.facing === 0 ? 2 : 1;
+          let rightCorner = psh.facing === 0 ? 0 : 3;
           leftCorner = flipUD(leftCorner);
           drawPieAtCellCorner(r, c, leftCorner, col);
           drawPieAtCellCorner(r, c + 1, rightCorner, col);
         } else {
-          // VERTICAL (top=(r,c), bottom=(r+1,c))
-          let topCorner, bottomCorner;
-          if (psh.facing === 0) {
-            // UP
-            topCorner = 3; // BL
-            bottomCorner = 1; // TR
-          } else {
-            // DOWN
-            topCorner = 2; // BR
-            bottomCorner = 0; // TL
-          }
+          let topCorner = psh.facing === 0 ? 3 : 2;
+          let bottomCorner = psh.facing === 0 ? 1 : 0;
           topCorner = flipLR(topCorner);
           drawPieAtCellCorner(r, c, topCorner, col);
           drawPieAtCellCorner(r + 1, c, bottomCorner, col);
@@ -524,115 +507,151 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
         }
       }
 
-      // ---------- SVG ----------
-      function quarterPath(cx, cy, size, corner) {
+      // ---------- SVG EXPORT (quarter tiles via clip paths) ----------
+      let svgIdCounter = 0;
+      function uid(prefix = "id_") {
+        svgIdCounter += 1;
+        return `${prefix}${svgIdCounter}`;
+      }
+
+      // Emits a <clipPath> with a circle centered at the *opposite* corner of the cell,
+      // then draws a cell rect clipped to that circle (exact quarter-disk).
+      // corner: 0=TL,1=TR,2=BR,3=BL (same as drawPieAtCellCorner)
+      function emitQuarterWithClip(x, y, size, corner, fill, defsOut, bodyOut) {
         const r = size;
-        const x0 = corner === 0 || corner === 3 ? cx : cx + r;
-        const y0 = corner === 0 || corner === 1 ? cy + r : cy;
-        const x1 = corner === 0 || corner === 3 ? cx + r : cx;
-        const y1 = corner === 0 || corner === 1 ? cy : cy + r;
-        return `M ${x0} ${y0} A ${r} ${r} 0 0 1 ${x1} ${y1} L ${cx} ${cy} Z`;
+
+        // Opposite-corner centers (matches p5 arc centers with diam=2*CELL)
+        // Center on the SAME corner (matches p5 drawPieAtCellCorner)
+        const centers = [
+          [x, y], // 0: TL
+          [x + r, y], // 1: TR
+          [x + r, y + r], // 2: BR
+          [x, y + r], // 3: BL
+        ];
+
+        const [cx, cy] = centers[corner] || centers[0];
+
+        const clipId = uid("qclip_");
+        defsOut.push(
+          `<clipPath id="${clipId}"><circle cx="${cx}" cy="${cy}" r="${r}"/></clipPath>`
+        );
+        bodyOut.push(
+          `<rect x="${x}" y="${y}" width="${r}" height="${r}" fill="${fill}" clip-path="url(#${clipId})"/>`
+        );
       }
 
       function toSVGString() {
         const { targetW, targetH } = computeTargetSize();
+        const defs = [];
+        const body = [];
+
         const parts = [];
         parts.push(
           `<svg xmlns="http://www.w3.org/2000/svg" width="${targetW}" height="${targetH}" viewBox="0 0 ${targetW} ${targetH}">`
         );
         parts.push(`<rect width="100%" height="100%" fill="${BG}"/>`);
 
+        // Pills
         for (const t of placedTwo) {
-          if (t.kind === K.PILL) {
-            const x = cellX(t.c),
-              y = cellY(t.r);
-            const w2 = t.orientation === 0 ? 2 * CELL : CELL;
-            const h2 = t.orientation === 0 ? CELL : 2 * CELL;
-            const rx = CELL / 2;
-            parts.push(
-              `<rect x="${x}" y="${y}" width="${w2}" height="${h2}" rx="${rx}" ry="${rx}" fill="${t.col}"/>`
+          if (t.kind !== K.PILL) continue;
+          const x = cellX(t.c),
+            y = cellY(t.r);
+          const w2 = t.orientation === 0 ? 2 * CELL : CELL;
+          const h2 = t.orientation === 0 ? CELL : 2 * CELL;
+          const rx = CELL / 2;
+          body.push(
+            `<rect x="${x}" y="${y}" width="${w2}" height="${h2}" rx="${rx}" ry="${rx}" fill="${t.col}"/>`
+          );
+        }
+
+        // Halves (as two clipped quarters)
+        for (const t of placedTwo) {
+          if (t.kind !== K.HALF) continue;
+          const r = t.r,
+            c = t.c,
+            col = t.col;
+
+          if (t.orientation === 0) {
+            let leftCorner = t.facing === 0 ? 2 : 1;
+            let rightCorner = t.facing === 0 ? 0 : 3;
+            leftCorner = [3, 2, 1, 0][leftCorner]; // flipUD
+            emitQuarterWithClip(
+              cellX(c),
+              cellY(r),
+              CELL,
+              leftCorner,
+              col,
+              defs,
+              body
             );
-          } else if (t.kind === K.HALF) {
-            const r = t.r,
-              c = t.c,
-              col = t.col;
-            if (t.orientation === 0) {
-              let leftCorner = t.facing === 0 ? 2 : 1;
-              let rightCorner = t.facing === 0 ? 0 : 3;
-              leftCorner = [3, 2, 1, 0][leftCorner]; // flipUD
-              parts.push(
-                `<path d="${quarterPath(
-                  cellX(c),
-                  cellY(r),
-                  CELL,
-                  leftCorner
-                )}" fill="${col}"/>`
-              );
-              parts.push(
-                `<path d="${quarterPath(
-                  cellX(c + 1),
-                  cellY(r),
-                  CELL,
-                  rightCorner
-                )}" fill="${col}"/>`
-              );
-            } else {
-              let topCorner = t.facing === 0 ? 3 : 2;
-              let bottomCorner = t.facing === 0 ? 1 : 0;
-              topCorner = [1, 0, 3, 2][topCorner]; // flipLR
-              parts.push(
-                `<path d="${quarterPath(
-                  cellX(c),
-                  cellY(r),
-                  CELL,
-                  topCorner
-                )}" fill="${col}"/>`
-              );
-              parts.push(
-                `<path d="${quarterPath(
-                  cellX(c),
-                  cellY(r + 1),
-                  CELL,
-                  bottomCorner
-                )}" fill="${col}"/>`
-              );
-            }
+            emitQuarterWithClip(
+              cellX(c + 1),
+              cellY(r),
+              CELL,
+              rightCorner,
+              col,
+              defs,
+              body
+            );
+          } else {
+            let topCorner = t.facing === 0 ? 3 : 2;
+            let bottomCorner = t.facing === 0 ? 1 : 0;
+            topCorner = [1, 0, 3, 2][topCorner]; // flipLR
+            emitQuarterWithClip(
+              cellX(c),
+              cellY(r),
+              CELL,
+              topCorner,
+              col,
+              defs,
+              body
+            );
+            emitQuarterWithClip(
+              cellX(c),
+              cellY(r + 1),
+              CELL,
+              bottomCorner,
+              col,
+              defs,
+              body
+            );
           }
         }
 
+        // Singles
         for (const s of placedSingle) {
           if (s.kind === K.BLANK) continue;
           const x = cellX(s.c),
             y = cellY(s.r);
+
           if (s.kind === K.SQUARE) {
-            parts.push(
+            body.push(
               `<rect x="${x}" y="${y}" width="${CELL}" height="${CELL}" fill="${s.col}"/>`
             );
           } else if (s.kind === K.CIRCLE) {
             const r = CELL / 2;
-            parts.push(
+            body.push(
               `<circle cx="${x + r}" cy="${y + r}" r="${r}" fill="${s.col}"/>`
             );
           } else if (s.kind === K.PIE) {
-            parts.push(
-              `<path d="${quarterPath(x, y, CELL, s.corner)}" fill="${s.col}"/>`
-            );
+            emitQuarterWithClip(x, y, CELL, s.corner, s.col, defs, body);
           }
         }
 
+        // Optional grid
         if (p._params.showGrid) {
           for (let r = 0; r <= ROWS; r++)
-            parts.push(
-              `<line x1="0" y1="${r * CELL}" x2="${targetW}" y2="${
-                r * CELL
-              }" stroke="rgba(255,255,255,0.24)" stroke-width="1"/>`
+            body.push(
+              `<line x1="0" y1="${r * CELL}" x2="${targetW}" y2="${r * CELL}" stroke="rgba(255,255,255,0.24)" stroke-width="1"/>`
             );
           for (let c = 0; c <= COLS; c++)
-            parts.push(
+            body.push(
               `<line x1="${c * CELL}" y1="0" x2="${c * CELL}" y2="${targetH}" stroke="rgba(255,255,255,0.24)" stroke-width="1"/>`
             );
         }
 
+        if (defs.length) parts.push(`<defs>${defs.join("")}</defs>`);
+        parts.push(body.join(""));
         parts.push(`</svg>`);
         return parts.join("");
       }
@@ -654,17 +673,17 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
       p.setup = () => {
         p.pixelDensity(2);
         const cnv = p.createCanvas(10, 10);
-        // Make sure canvas sits inside our host
+        // Ensure canvas sits in our host (not <body>)
         cnv.parent(host.current);
         cnv.elt.style.display = "block";
         p.noLoop();
-        regenerate({ keepPalette: false }); // may randomize initially
+        regenerate({ keepPalette: false }); // initial render (may randomize)
       };
 
+      // External (React) bridge
       p.updateParamsOnly = (newParams) => {
         p._params = { ...p._params, ...newParams };
       };
-
       p.generateNow = (opts = { keepPalette: false }) => regenerate(opts);
       p.exportSVGNow = () => downloadSVG();
     };
@@ -672,7 +691,7 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
     const inst = new p5(sketch, host.current);
     instRef.current = inst;
 
-    // Debounced window resize (no ResizeObserver)
+    // Debounced window resize (keeps current palette)
     let rafId = null;
     let debounceId = null;
     const onWindowResize = () => {
@@ -683,7 +702,6 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
         debounceId = setTimeout(() => {
           const i = instRef.current;
           if (!i) return;
-          // keep same palette while resizing
           i.generateNow({ keepPalette: true });
         }, 150);
       });
