@@ -82,6 +82,35 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
       let lastTargetH = 0;
       let isRendering = false;
 
+      // --- Reusable p5.Graphics cache (max 3 buffers) ---
+      let bufCell = null; // CELL × CELL
+      let bufH2 = null; // 2CELL × CELL
+      let bufV2 = null; // CELL × 2CELL
+
+      function ensureBuffers() {
+        const W = Math.max(1, CELL);
+        const H = W;
+
+        if (!bufCell || bufCell.width !== W || bufCell.height !== H) {
+          try {
+            bufCell?.remove?.();
+          } catch (_) {}
+          bufCell = p.createGraphics(W, H);
+        }
+        if (!bufH2 || bufH2.width !== 2 * W || bufH2.height !== H) {
+          try {
+            bufH2?.remove?.();
+          } catch (_) {}
+          bufH2 = p.createGraphics(2 * W, H);
+        }
+        if (!bufV2 || bufV2.width !== W || bufV2.height !== 2 * H) {
+          try {
+            bufV2?.remove?.();
+          } catch (_) {}
+          bufV2 = p.createGraphics(W, 2 * H);
+        }
+      }
+
       // ---------- SIZING ----------
       function measureWrapper() {
         const wrap = host.current?.parentElement;
@@ -279,22 +308,23 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
       }
 
       function fillSingles() {
+        // Enforce uniqueness per cell, even if something upstream misflags occ[].
+        const singlesByKey = new Map(); // "r,c" -> shape
         for (let r = 0; r < ROWS; r++) {
           for (let c = 0; c < COLS; c++) {
             if (!occ[r][c]) {
               const kind = pickWeightedSingle();
-              const s = {
-                kind,
-                r,
-                c,
-                col: SHAPE_COLS[rnd(SHAPE_COLS.length)],
-              };
+              const s = { kind, r, c, col: SHAPE_COLS[rnd(SHAPE_COLS.length)] };
               if (kind === K.PIE) s.corner = rnd(4);
-              placedSingle.push(s);
-              occ[r][c] = true;
+              const k = `${r},${c}`;
+              if (!singlesByKey.has(k)) {
+                singlesByKey.set(k, s);
+                occ[r][c] = true; // mark occupied once
+              }
             }
           }
         }
+        placedSingle = Array.from(singlesByKey.values());
       }
 
       function preventThreeInARow() {
@@ -373,37 +403,35 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
         p.pop();
       }
 
+      // CELL-sized cache; call ensureBuffers() before rendering
       function drawPieAtCellCorner(r, c, corner, col) {
-        const x = cellX(c),
-          y = cellY(r);
+        const gx = bufCell; // CELL × CELL off-screen
+        gx.clear();
+        gx.noStroke();
+        gx.fill(col);
+
+        // Radius = CELL, diameter = 2*CELL; center sits on the cell corner.
         const diam = 2 * CELL;
 
-        p.noStroke();
-        p.fill(col);
-
         switch (corner) {
-          case 0: // TL
-            p.arc(x, y, diam, diam, 0, p.HALF_PI, p.PIE);
+          case 0: // TL (center at 0,0) -> fill BR quadrant of the circle
+            gx.arc(0, 0, diam, diam, 0, p.HALF_PI, p.PIE);
             break;
-          case 1: // TR
-            p.arc(x + CELL, y, diam, diam, p.HALF_PI, p.PI, p.PIE);
+          case 1: // TR (center at CELL,0) -> fill BL quadrant
+            gx.arc(CELL, 0, diam, diam, p.HALF_PI, p.PI, p.PIE);
             break;
-          case 2: // BR
-            p.arc(
-              x + CELL,
-              y + CELL,
-              diam,
-              diam,
-              p.PI,
-              p.PI + p.HALF_PI,
-              p.PIE
-            );
+          case 2: // BR (center at CELL,CELL) -> fill UL quadrant
+            gx.arc(CELL, CELL, diam, diam, p.PI, p.PI + p.HALF_PI, p.PIE);
             break;
-          case 3: // BL
-            p.arc(x, y + CELL, diam, diam, p.PI + p.HALF_PI, p.TWO_PI, p.PIE);
+          case 3: // BL (center at 0,CELL) -> fill UR quadrant
+            gx.arc(0, CELL, diam, diam, p.PI + p.HALF_PI, p.TWO_PI, p.PIE);
             break;
         }
+
+        // Blit at the cell origin — **no +/- CELL offsets here**
+        p.image(gx, c * CELL, r * CELL);
       }
+
       function drawPill(psh) {
         const x = cellX(psh.c),
           y = cellY(psh.r);
@@ -423,16 +451,19 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
         const r = psh.r,
           c = psh.c,
           col = psh.col;
+
         if (psh.orientation === 0) {
-          let leftCorner = psh.facing === 0 ? 2 : 1;
-          let rightCorner = psh.facing === 0 ? 0 : 3;
-          leftCorner = flipUD(leftCorner);
+          // horizontal: (r,c) + (r,c+1)
+          let leftCorner = psh.facing === 0 ? 2 : 1; // BR or TR
+          let rightCorner = psh.facing === 0 ? 0 : 3; // TL or BL
+          leftCorner = flipUD(leftCorner); // same as SVG export logic
           drawPieAtCellCorner(r, c, leftCorner, col);
           drawPieAtCellCorner(r, c + 1, rightCorner, col);
         } else {
-          let topCorner = psh.facing === 0 ? 3 : 2;
-          let bottomCorner = psh.facing === 0 ? 1 : 0;
-          topCorner = flipLR(topCorner);
+          // vertical: (r,c) + (r+1,c)
+          let topCorner = psh.facing === 0 ? 3 : 2; // BL or BR
+          let bottomCorner = psh.facing === 0 ? 1 : 0; // TR or TL
+          topCorner = flipLR(topCorner); // same as SVG export logic
           drawPieAtCellCorner(r, c, topCorner, col);
           drawPieAtCellCorner(r + 1, c, bottomCorner, col);
         }
@@ -460,20 +491,23 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
       }
 
       function renderAll() {
+        ensureBuffers(); // keeps bufCell/bufH2/bufV2 in sync with CELL
         p.background(BG);
+
         for (const t of placedTwo) if (t.kind === K.PILL) drawPill(t);
         for (const t of placedTwo) if (t.kind === K.HALF) drawHalf(t);
+        // singles (extra safety: skip if a duplicate sneaks in)
         const drawn = Array.from({ length: ROWS }, () =>
           Array(COLS).fill(false)
         );
         for (const s of placedSingle) {
+          if (s.r < 0 || s.r >= ROWS || s.c < 0 || s.c >= COLS) continue;
           if (drawn[s.r][s.c]) continue;
           if (s.kind === K.SQUARE) drawSquare(s);
           else if (s.kind === K.PIE) drawPie(s);
           else if (s.kind === K.CIRCLE) drawCircle(s);
           drawn[s.r][s.c] = true;
         }
-        if (p._params.showGrid) drawGrid();
       }
 
       function regenerate({ keepPalette }) {
@@ -704,10 +738,23 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
         }, 150);
       });
     };
+
     window.addEventListener("resize", onWindowResize);
 
     return () => {
       window.removeEventListener("resize", onWindowResize);
+      // dispose off-screen buffers safely
+      try {
+        bufCell?.remove?.();
+      } catch (_) {}
+      try {
+        bufH2?.remove?.();
+      } catch (_) {}
+      try {
+        bufV2?.remove?.();
+      } catch (_) {}
+      bufCell = bufH2 = bufV2 = null;
+
       instRef.current?.remove();
       instRef.current = null;
       if (rafId) cancelAnimationFrame(rafId);
