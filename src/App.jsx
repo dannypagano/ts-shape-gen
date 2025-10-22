@@ -67,21 +67,19 @@ export default function App() {
   // Palette control
   const [params, setParams] = useState({
     palettes: [
-      ["#19224A", "#3F5DB3", "#6C94EC"],
-      ["#082429", "#0D4B3B", "#1EA672"],
-      ["#3A1607", "#762B0B", "#D97917"],
-      ["#420000", "#940821", "#E46C63"],
-      ["#27103C", "#673C87", "#AE74D8"],
+      ["#19224A", "#3F5DB3", "#6C94EC"], // Blue
+      ["#082429", "#0D4B3B", "#1EA672"], // Green
+      ["#3A1607", "#762B0B", "#D97917"], // Orange
+      ["#420000", "#940821", "#E46C63"], // Red
+      ["#27103C", "#673C87", "#AE74D8"], // Purple
     ],
     lockPalette: false,
     lockedIndex: 0,
     randomizePalette: true,
   });
 
-  // The actual palette chosen on last full Generate
+  // Remember the actual palette used on the last full Generate
   const [lastPalette, setLastPalette] = useState(null);
-
-  // Error overlay
   const [fatalError, setFatalError] = useState(null);
 
   const sketchRef = useRef(null);
@@ -104,7 +102,7 @@ export default function App() {
     lockPalette: params.lockPalette,
     lockedIndex: params.lockedIndex,
     randomizePalette: params.randomizePalette,
-    forcePalette: forcePal,
+    forcePalette: forcePal, // stick to last chosen palette during live updates
     fitToViewport: true,
     maxCanvasWidth: 1280,
   });
@@ -140,18 +138,6 @@ export default function App() {
   }, []);
 
   const exportSVG = () => sketchRef.current?.exportSVG();
-
-  const lockPaletteAt = (i) => {
-    const pal = params.palettes[i];
-    setParams((prev) => ({
-      ...prev,
-      lockPalette: true,
-      lockedIndex: i,
-      randomizePalette: false,
-    }));
-    setLastPalette(pal);
-    sketchRef.current?.generate(buildParams(pal), { keepPalette: true });
-  };
 
   return (
     <div className="min-h-screen grid grid-cols-1 lg:grid-cols-[380px_1fr] bg-zinc-950 text-zinc-100">
@@ -313,6 +299,7 @@ export default function App() {
           <section id="palette">
             <h3 className="text-md font-semibold text-zinc-100">Palette</h3>
             <div className="mt-3 space-y-2">
+              {/* Random option styled like the others */}
               <button
                 onClick={() =>
                   setParams((prev) => ({
@@ -404,6 +391,7 @@ export default function App() {
           </div>
         )}
 
+        {/* Centered canvas, no extra container */}
         <div className="w-full h-[calc(100vh-0px)] flex items-center justify-center">
           <Sketch
             ref={sketchRef}

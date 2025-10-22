@@ -19,9 +19,19 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
   const host = useRef(null);
   const instRef = useRef(null);
 
+  // keep latest callbacks without remounting p5
+  const onErrorRef = useRef(onError);
+  const onPaletteChosenRef = useRef(onPaletteChosen);
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
+  useEffect(() => {
+    onPaletteChosenRef.current = onPaletteChosen;
+  }, [onPaletteChosen]);
+
   useEffect(() => {
     const sketch = (p) => {
-      // Defaults until first .generate()
+      // ---------- PARAMS ----------
       p._params = {
         cols: 14,
         rows: 10,
@@ -39,61 +49,66 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
         lockPalette: false,
         lockedIndex: 0,
         randomizePalette: true,
-        // App can pin an actual palette here for live updates
+        // App may pin an actual palette for live updates
         forcePalette: null,
         fitToViewport: true,
         maxCanvasWidth: 1280,
       };
 
-      // Grid state
+      // ---------- STATE ----------
       let CELL = 70;
       let COLS = 14;
       let ROWS = 10;
 
-      // Layout state
       let occ = [];
       let placedTwo = [];
       let placedSingle = [];
 
-      // Colors
       let BG = "#0B0B0B";
       let SHAPE_COLS = ["#999", "#666"];
 
       const MAX_TRIES = 200;
       const rnd = (n) => (Math.random() * n) | 0;
 
-      // Cache last canvas size to avoid needless resize loops
-      let lastCanvasW = 10;
-      let lastCanvasH = 10;
+      let lastTargetW = 0;
+      let lastTargetH = 0;
+      let isRendering = false;
 
       // ---------- SIZING ----------
-      function computeCanvasSize() {
+      function measureWrapper() {
+        const wrap = host.current?.parentElement;
+        const wrapW = Math.floor(
+          Math.min(p._params.maxCanvasWidth || 1280, wrap?.clientWidth || 0)
+        );
+        const wrapH = Math.max(200, Math.floor(wrap?.clientHeight || 0));
+        return { wrapW, wrapH };
+      }
+
+      function computeTargetSize() {
         COLS = Math.max(1, p._params.cols | 0);
         ROWS = Math.max(1, p._params.rows | 0);
 
-        const wrap = host.current?.parentElement; // flex center area
-        const maxW = Math.min(
-          p._params.maxCanvasWidth || 1280,
-          wrap?.clientWidth || window.innerWidth
-        );
-
-        const availableH = Math.max(
-          200,
-          Math.floor((wrap?.clientHeight || window.innerHeight) - 24)
-        );
-
-        const cellW = Math.floor(maxW / COLS);
-        const cellH = Math.floor(availableH / ROWS);
+        const { wrapW, wrapH } = measureWrapper();
+        const cellW = Math.floor(wrapW / COLS);
+        const cellH = Math.floor(wrapH / ROWS);
         CELL = Math.max(4, Math.min(cellW, cellH));
 
-        const w = CELL * COLS;
-        const h = CELL * ROWS;
+        const targetW = CELL * COLS;
+        const targetH = CELL * ROWS;
+        return { targetW, targetH };
+      }
 
-        if (p.width !== w || p.height !== h) {
-          p.resizeCanvas(w, h);
-          lastCanvasW = w;
-          lastCanvasH = h;
+      function applySizeIfNeeded() {
+        const { targetW, targetH } = computeTargetSize();
+        const changed = targetW !== lastTargetW || targetH !== lastTargetH;
+        lastTargetW = targetW;
+        lastTargetH = targetH;
+
+        if (p.width !== targetW || p.height !== targetH) {
+          p.resizeCanvas(targetW, targetH);
+          return true;
         }
+        return changed;
       }
 
       const cellX = (c) => c * CELL;
@@ -107,7 +122,7 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
       }
 
       function choosePalette() {
-        // If App is forcing a palette, honor it
+        // Forced palette: used during live layout changes
         if (
           Array.isArray(p._params.forcePalette) &&
           p._params.forcePalette.length === 3
@@ -132,12 +147,10 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
       }
 
       // ---------- HELPERS ----------
-      function shuffle(triples) {
-        for (let i = triples.length - 1; i > 0; i--) {
+      function shuffle(arr) {
+        for (let i = arr.length - 1; i > 0; i--) {
           const j = rnd(i + 1);
-          const t = triples[i];
-          triples[i] = triples[j];
-          triples[j] = t;
+          [arr[i], arr[j]] = [arr[j], arr[i]];
         }
       }
 
@@ -164,10 +177,9 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
 
       // ---------- BUILD ----------
       function build({ keepPalette }) {
-        computeCanvasSize();
+        applySizeIfNeeded();
 
         if (keepPalette) {
-          // If a forcePalette is provided, apply it; else keep current BG/SHAPE_COLS
           if (
             Array.isArray(p._params.forcePalette) &&
             p._params.forcePalette.length === 3
@@ -176,8 +188,7 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
           }
         } else {
           const pal = choosePalette();
-          if (typeof onPaletteChosen === "function" && pal)
-            onPaletteChosen(pal);
+          onPaletteChosenRef.current?.(pal);
         }
 
         placedTwo = [];
@@ -281,6 +292,7 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
       function preventThreeInARow() {
         const get = (rr, cc) =>
           placedSingle.find((s) => s.r === rr && s.c === cc);
+
         // Horizontal
         for (let r = 0; r < ROWS; r++) {
           for (let c = 0; c <= COLS - 3; c++) {
@@ -315,7 +327,7 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
         }
       }
 
-      // ---------- BBOX & DRAW ----------
+      // ---------- BBOX ----------
       function computeBBoxes() {
         const boxes = [];
         for (const t of placedTwo) {
@@ -343,6 +355,7 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
         return false;
       }
 
+      // ---------- DRAW ----------
       function drawGrid() {
         p.push();
         p.stroke(255, 60);
@@ -410,29 +423,34 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
         const r = psh.r,
           c = psh.c,
           col = psh.col;
+
         if (psh.orientation === 0) {
+          // HORIZONTAL (left=(r,c), right=(r,c+1))
           let leftCorner, rightCorner;
           if (psh.facing === 0) {
-            leftCorner = 2;
-            rightCorner = 0;
-          } // LEFT
-          else {
-            leftCorner = 1;
-            rightCorner = 3;
-          } // RIGHT
+            // LEFT
+            leftCorner = 2; // BR
+            rightCorner = 0; // TL
+          } else {
+            // RIGHT
+            leftCorner = 1; // TR
+            rightCorner = 3; // BL
+          }
           leftCorner = flipUD(leftCorner);
           drawPieAtCellCorner(r, c, leftCorner, col);
           drawPieAtCellCorner(r, c + 1, rightCorner, col);
         } else {
+          // VERTICAL (top=(r,c), bottom=(r+1,c))
           let topCorner, bottomCorner;
           if (psh.facing === 0) {
-            topCorner = 3;
-            bottomCorner = 1;
-          } // UP
-          else {
-            topCorner = 2;
-            bottomCorner = 0;
-          } // DOWN
+            // UP
+            topCorner = 3; // BL
+            bottomCorner = 1; // TR
+          } else {
+            // DOWN
+            topCorner = 2; // BR
+            bottomCorner = 0; // TL
+          }
           topCorner = flipLR(topCorner);
           drawPieAtCellCorner(r, c, topCorner, col);
           drawPieAtCellCorner(r + 1, c, bottomCorner, col);
@@ -480,27 +498,33 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
       }
 
       function regenerate({ keepPalette }) {
+        if (isRendering) return false;
+        isRendering = true;
         try {
+          applySizeIfNeeded();
           for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
             build({ keepPalette });
             const boxes = computeBBoxes();
             if (!hasOverlap(boxes)) {
               renderAll();
+              isRendering = false;
               return true;
             }
           }
           renderAll();
+          isRendering = false;
           return true;
         } catch (e) {
-          if (typeof onError === "function") onError(e);
+          onErrorRef.current?.(e);
           try {
             p.clear();
           } catch (_) {}
+          isRendering = false;
           return false;
         }
       }
 
-      // ---------- SVG EXPORT ----------
+      // ---------- SVG ----------
       function quarterPath(cx, cy, size, corner) {
         const r = size;
         const x0 = corner === 0 || corner === 3 ? cx : cx + r;
@@ -511,11 +535,10 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
       }
 
       function toSVGString() {
-        const w = CELL * COLS;
-        const h = CELL * ROWS;
+        const { targetW, targetH } = computeTargetSize();
         const parts = [];
         parts.push(
-          `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`
+          `<svg xmlns="http://www.w3.org/2000/svg" width="${targetW}" height="${targetH}" viewBox="0 0 ${targetW} ${targetH}">`
         );
         parts.push(`<rect width="100%" height="100%" fill="${BG}"/>`);
 
@@ -538,20 +561,40 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
               let rightCorner = t.facing === 0 ? 0 : 3;
               leftCorner = [3, 2, 1, 0][leftCorner]; // flipUD
               parts.push(
-                `<path d="${quarterPath(cellX(c), cellY(r), CELL, leftCorner)}" fill="${col}"/>`
+                `<path d="${quarterPath(
+                  cellX(c),
+                  cellY(r),
+                  CELL,
+                  leftCorner
+                )}" fill="${col}"/>`
               );
               parts.push(
-                `<path d="${quarterPath(cellX(c + 1), cellY(r), CELL, rightCorner)}" fill="${col}"/>`
+                `<path d="${quarterPath(
+                  cellX(c + 1),
+                  cellY(r),
+                  CELL,
+                  rightCorner
+                )}" fill="${col}"/>`
               );
             } else {
               let topCorner = t.facing === 0 ? 3 : 2;
               let bottomCorner = t.facing === 0 ? 1 : 0;
               topCorner = [1, 0, 3, 2][topCorner]; // flipLR
               parts.push(
-                `<path d="${quarterPath(cellX(c), cellY(r), CELL, topCorner)}" fill="${col}"/>`
+                `<path d="${quarterPath(
+                  cellX(c),
+                  cellY(r),
+                  CELL,
+                  topCorner
+                )}" fill="${col}"/>`
               );
               parts.push(
-                `<path d="${quarterPath(cellX(c), cellY(r + 1), CELL, bottomCorner)}" fill="${col}"/>`
+                `<path d="${quarterPath(
+                  cellX(c),
+                  cellY(r + 1),
+                  CELL,
+                  bottomCorner
+                )}" fill="${col}"/>`
               );
             }
           }
@@ -580,11 +623,13 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
         if (p._params.showGrid) {
           for (let r = 0; r <= ROWS; r++)
             parts.push(
-              `<line x1="0" y1="${r * CELL}" x2="${w}" y2="${r * CELL}" stroke="rgba(255,255,255,0.24)" stroke-width="1"/>`
+              `<line x1="0" y1="${r * CELL}" x2="${targetW}" y2="${
+                r * CELL
+              }" stroke="rgba(255,255,255,0.24)" stroke-width="1"/>`
             );
           for (let c = 0; c <= COLS; c++)
             parts.push(
-              `<line x1="${c * CELL}" y1="0" x2="${c * CELL}" y2="${h}" stroke="rgba(255,255,255,0.24)" stroke-width="1"/>`
+              `<line x1="${c * CELL}" y1="0" x2="${c * CELL}" y2="${targetH}" stroke="rgba(255,255,255,0.24)" stroke-width="1"/>`
             );
         }
 
@@ -608,14 +653,16 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
       // ---------- P5 LIFECYCLE ----------
       p.setup = () => {
         p.pixelDensity(2);
-        p.createCanvas(lastCanvasW, lastCanvasH);
+        const cnv = p.createCanvas(10, 10);
+        // Make sure canvas sits inside our host
+        cnv.parent(host.current);
+        cnv.elt.style.display = "block";
         p.noLoop();
-        regenerate({ keepPalette: false }); // initial can randomize
+        regenerate({ keepPalette: false }); // may randomize initially
       };
 
       p.updateParamsOnly = (newParams) => {
         p._params = { ...p._params, ...newParams };
-        // computeCanvasSize() is called inside regenerate
       };
 
       p.generateNow = (opts = { keepPalette: false }) => regenerate(opts);
@@ -625,31 +672,33 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
     const inst = new p5(sketch, host.current);
     instRef.current = inst;
 
-    // Handle window resize here with rAF throttle and keep the current palette
-    let resizeScheduled = false;
-    const onResize = () => {
-      if (resizeScheduled) return;
-      resizeScheduled = true;
-      requestAnimationFrame(() => {
-        resizeScheduled = false;
-        const i = instRef.current;
-        if (!i) return;
-        // Reuse current params; keep palette to prevent randomization
-        i.updateParamsOnly(i._params);
-        i.generateNow({ keepPalette: true });
+    // Debounced window resize (no ResizeObserver)
+    let rafId = null;
+    let debounceId = null;
+    const onWindowResize = () => {
+      if (!instRef.current) return;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        if (debounceId) clearTimeout(debounceId);
+        debounceId = setTimeout(() => {
+          const i = instRef.current;
+          if (!i) return;
+          // keep same palette while resizing
+          i.generateNow({ keepPalette: true });
+        }, 150);
       });
     };
-
-    window.addEventListener("resize", onResize);
+    window.addEventListener("resize", onWindowResize);
 
     return () => {
-      window.removeEventListener("resize", onResize);
+      window.removeEventListener("resize", onWindowResize);
       instRef.current?.remove();
       instRef.current = null;
+      if (rafId) cancelAnimationFrame(rafId);
+      if (debounceId) clearTimeout(debounceId);
     };
-  }, [onError, onPaletteChosen]);
+  }, []); // mount p5 once
 
-  // Imperative API for parent
   useImperativeHandle(
     ref,
     () => ({
