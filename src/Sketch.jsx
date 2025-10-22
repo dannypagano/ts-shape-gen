@@ -374,54 +374,46 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
       }
 
       function drawPieAtCellCorner(r, c, corner, col) {
-        const gx = p.createGraphics(CELL, CELL);
-        gx.noStroke();
-        gx.background(0, 0);
-        gx.fill(col);
-        const diam = 2 * CELL; // center at opposite corner, matches export logic
+        const x = cellX(c),
+          y = cellY(r);
+        const diam = 2 * CELL;
+
+        p.noStroke();
+        p.fill(col);
+
         switch (corner) {
-          case 0:
-            gx.arc(0, 0, diam, diam, 0, p.HALF_PI, p.PIE);
-            break; // TL
-          case 1:
-            gx.arc(CELL, 0, diam, diam, p.HALF_PI, p.PI, p.PIE);
-            break; // TR
-          case 2:
-            gx.arc(CELL, CELL, diam, diam, p.PI, p.PI + p.HALF_PI, p.PIE);
-            break; // BR
-          case 3:
-            gx.arc(0, CELL, diam, diam, p.PI + p.HALF_PI, p.TWO_PI, p.PIE);
-            break; // BL
-          default:
+          case 0: // TL
+            p.arc(x, y, diam, diam, 0, p.HALF_PI, p.PIE);
+            break;
+          case 1: // TR
+            p.arc(x + CELL, y, diam, diam, p.HALF_PI, p.PI, p.PIE);
+            break;
+          case 2: // BR
+            p.arc(
+              x + CELL,
+              y + CELL,
+              diam,
+              diam,
+              p.PI,
+              p.PI + p.HALF_PI,
+              p.PIE
+            );
+            break;
+          case 3: // BL
+            p.arc(x, y + CELL, diam, diam, p.PI + p.HALF_PI, p.TWO_PI, p.PIE);
             break;
         }
-        p.image(gx, cellX(c), cellY(r));
       }
-
       function drawPill(psh) {
         const x = cellX(psh.c),
           y = cellY(psh.r);
         const w = psh.orientation === 0 ? 2 * CELL : CELL;
         const h = psh.orientation === 0 ? CELL : 2 * CELL;
 
-        const g = p.createGraphics(w, h);
-        g.noStroke();
-        g.background(0, 0);
-        g.fill(psh.col);
-        g.ellipseMode(p.CENTER);
-
-        if (psh.orientation === 0) {
-          const midW = w - CELL;
-          g.rect(CELL / 2, 0, midW, h);
-          g.ellipse(CELL / 2, h / 2, CELL, CELL);
-          g.ellipse(w - CELL / 2, h / 2, CELL, CELL);
-        } else {
-          const midH = h - CELL;
-          g.rect(0, CELL / 2, w, midH);
-          g.ellipse(w / 2, CELL / 2, CELL, CELL);
-          g.ellipse(w / 2, h - CELL / 2, CELL, CELL);
-        }
-        p.image(g, x, y);
+        p.noStroke();
+        p.fill(psh.col);
+        // Rounded-rect pill: radius = CELL/2 matches the p5.Graphics version
+        p.rect(x, y, w, h, CELL / 2);
       }
 
       const flipLR = (c) => [1, 0, 3, 2][c] ?? c;
@@ -447,12 +439,11 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
       }
 
       function drawSquare(s) {
-        const g = p.createGraphics(CELL, CELL);
-        g.noStroke();
-        g.background(0, 0);
-        g.fill(s.col);
-        g.rect(0, 0, CELL, CELL);
-        p.image(g, cellX(s.c), cellY(s.r));
+        const x = cellX(s.c),
+          y = cellY(s.r);
+        p.noStroke();
+        p.fill(s.col);
+        p.rect(x, y, CELL, CELL);
       }
 
       function drawPie(s) {
@@ -460,13 +451,12 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
       }
 
       function drawCircle(s) {
-        const g = p.createGraphics(CELL, CELL);
-        g.noStroke();
-        g.background(0, 0);
-        g.fill(s.col);
-        g.ellipseMode(p.CORNER);
-        g.ellipse(0, 0, CELL, CELL);
-        p.image(g, cellX(s.c), cellY(s.r));
+        const x = cellX(s.c),
+          y = cellY(s.r);
+        p.noStroke();
+        p.fill(s.col);
+        p.ellipseMode(p.CORNER);
+        p.ellipse(x, y, CELL, CELL);
       }
 
       function renderAll() {
@@ -677,7 +667,6 @@ const Sketch = forwardRef(function Sketch({ onError, onPaletteChosen }, ref) {
 
       // ---------- P5 LIFECYCLE ----------
       p.setup = () => {
-        p.pixelDensity(2);
         const cnv = p.createCanvas(10, 10);
         // Ensure canvas sits in our host (not <body>)
         cnv.parent(host.current);
