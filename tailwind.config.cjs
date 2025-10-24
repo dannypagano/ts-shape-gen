@@ -1,4 +1,3 @@
-// tailwind.config.cjs
 module.exports = {
   content: [
     "./index.html",
@@ -6,9 +5,5 @@ module.exports = {
     "./node_modules/preline/dist/*.js",
   ],
   theme: { extend: {} },
-  plugins: [
-    require("@tailwindcss/forms"),
-    require("@tailwindcss/typography"),
-    require("@preline/plugin"),
-  ],
+  plugins: [require("@tailwindcss/forms"), require("@tailwindcss/typography")],
 };
