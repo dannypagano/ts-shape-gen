@@ -1,4 +1,8 @@
 # Tailscale Shape Generator
+
+You can access this tool now! Head over to https://shapes.ide-rigel.ts.net and start creating.
+
+## Installing and running locally
 To run this app locally follow these quick steps on a Mac or Linux device.
 These steps assume you have already installed a few software tools:
 - a package manager like yarn
