@@ -38,29 +38,27 @@ Paste it into terminal and hit enter.
 Alternatively, you can download the repo as a .zip file and unpack it into your install location of choice.
 
 ### 4. Install dependencies and build the app
-Using your package manager of choice, I like yarn, you need to build the app.
-This essentially packages it up for use, and gets it ready to publish.
+Hop into your new project directory with
 ```
-yarn build
+cd ts-shape-gen
+```
+Using your package manager of choice (I like yarn) you need to install the software dependencies for the app.
+```
+yarn install
 ```
 
 ### 5. Serve the app to the internet
 Spin up a local server that runs the app by running
 ```
-yarn serve
+yarn vite serve
 ```
-
-### [Optional] Tell yarn to serve the app over a specific port
-You can pass a couple arguments when you run `yarn serve` that tells
-yarn to make the app available on a specific port.
-```
-yarn serve -s dist -l 8443
-```
-This example serves the app over the same port used by Tailscale Funnel,
-so you can share it with the rest of the internet, instead of just inside your tailnet.
+Vite is a tool for developing, building and serving web projects.
 
 ### 6. Start using the app
-Open a web browser and paste in the IP address and port that appeared when you ran `yarn serve`
+Open a web browser and paste in
+```
+http://localhost:8443/
+```
 
 ### [Optional] Make the app available over Tailscale Funnel
 In a new terminal window, navigate back to your project's install folder.
