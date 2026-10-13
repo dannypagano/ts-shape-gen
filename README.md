@@ -1,6 +1,5 @@
 # Tailscale Shape Generator
-
-You can access this tool now! Head over to https://shapes.ide-rigel.ts.net and start creating.
+A little web app for creating abstract geometric shape compositions, like the ones in Tailscale's brand design language from 2025-2026. This was a tool I created while working there to automate a tedious process.
 
 ## Installing and running locally
 To run this app locally follow these quick steps on a Mac or Linux device.
