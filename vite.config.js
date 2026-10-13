@@ -3,7 +3,6 @@ import react from "@vitejs/plugin-react";
 import legacy from "@vitejs/plugin-legacy";
 
 export default defineConfig({
-  base: "/shapes",
   plugins: [
     react(),
     legacy({
@@ -17,9 +16,4 @@ export default defineConfig({
       modernPolyfills: true,
     }),
   ],
-
-  server: {
-    host: true, // so it's reachable over LAN
-    port: 8443, // 👈 change this number
-  },
 });
